@@ -83,10 +83,11 @@ func main() {
 
 	for _, v := range hashes {
 		if len(v) > 1 {
+			fmt.Println("{")
 			for _, p := range v {
-				fmt.Println(p)
+				fmt.Println("    " + p)
 			}
-			fmt.Println()
+			fmt.Println("}")
 		}
 	}
 }

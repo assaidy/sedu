@@ -1,13 +1,13 @@
 ## sedu: search duplicate files
 
-## Build
+### Build
 
 ```console
 $ git clone https://github.com/assaidy/sedu
 $ cd ./sedu
 $ go build
 ```
-## Usage
+### Usage
 
 ```console
 $ ./sedu <dir-path>
