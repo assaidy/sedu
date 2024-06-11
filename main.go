@@ -44,8 +44,8 @@ func main() {
 	args := os.Args
 
 	if len(args) != 2 {
-		fmt.Println("Usage: sedu <file-path>")
-		fmt.Println("ERROR: messing argument: file-path")
+		fmt.Println("Usage: sedu <dir-path>")
+		fmt.Println("ERROR: messing argument: dir-path")
 		os.Exit(1)
 	}
 
