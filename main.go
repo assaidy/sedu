@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha1"
 	"fmt"
 	"io"
@@ -12,8 +13,11 @@ import (
 
 // isSymlink checks if a given path is a symbolic link.
 func isSymlink(path string) bool {
-	_, err := os.Readlink(path)
-	return err == nil
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeSymlink != 0
 }
 
 // listFiles recursively lists all files in a directory, ignoring symlinks.
@@ -46,7 +50,7 @@ func listFiles(dirPath string) []string {
 	return files
 }
 
-// computeHash computes the SHA-1 hash of a file.
+// computeHash computes the SHA-1 hash of a file using buffered I/O.
 func computeHash(path string) (string, error) {
 	hasher := sha1.New()
 
@@ -56,7 +60,8 @@ func computeHash(path string) (string, error) {
 	}
 	defer file.Close()
 
-	if _, err := io.Copy(hasher, file); err != nil {
+	bufferedReader := bufio.NewReader(file)
+	if _, err := io.Copy(hasher, bufferedReader); err != nil {
 		return "", err
 	}
 
@@ -125,10 +130,10 @@ func main() {
 
 	for result := range results {
 		hash, path := result.hash, result.path
-		mutex.Lock()
 		if _, exists := hashToPaths[hash]; !exists {
 			hashToPaths[hash] = []string{}
 		}
+		mutex.Lock()
 		hashToPaths[hash] = append(hashToPaths[hash], path)
 		mutex.Unlock()
 	}
