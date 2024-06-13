@@ -1,43 +1,79 @@
 package main
 
-// TODO: do it in parallel
-
 import (
 	"crypto/sha1"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 )
 
+// FIX: ignore symLinks
 func isSymLink(path string) bool {
 	_, err := os.Readlink(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("Error:", err)
-		} else {
-			return false
-		}
-	}
-	return true
+	return err == nil
 }
 
-func getHash(path string) string {
+func listDirFiles(dirPath string) []string {
+	var res []string
+	var stack []string
+	stack = append(stack, dirPath)
+
+	for len(stack) > 0 {
+		curDir := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		enteries, err := os.ReadDir(curDir)
+		if err != nil {
+			fmt.Println("Error:", err)
+			continue
+		}
+
+		for _, entery := range enteries {
+			path := filepath.Join(curDir, entery.Name())
+			if entery.IsDir() {
+				stack = append(stack, path)
+			} else {
+				// fmt.Println(path)
+				res = append(res, path)
+			}
+		}
+	}
+	return res
+}
+
+func getHash(path string) (string, error) {
 	h := sha1.New()
 
 	file, err := os.Open(path)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return ""
+		return "", err
 	}
 	defer file.Close()
 
 	if _, err := io.Copy(h, file); err != nil {
-		fmt.Println("Error:", err)
-		return ""
+		return "", err
 	}
 
-	return fmt.Sprintf("%x", h.Sum(nil))
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+type FileHash struct {
+	hash, path string
+}
+
+func worker(files <-chan string, results chan<- *FileHash, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for file := range files {
+		hash, err := getHash(file)
+		if err != nil {
+			fmt.Println("Error:", err)
+			continue
+		}
+		results <- &FileHash{hash, file}
+	}
 }
 
 func main() {
@@ -51,41 +87,54 @@ func main() {
 
 	dirPath := args[1]
 
-	hashes := make(map[string][]string)
+	fmt.Println("[INFO] collecting all files...")
+	allFiles := listDirFiles(dirPath)
 
-	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			// Ignore errors that indicate the file was not found
-			if os.IsNotExist(err) || os.IsPermission(err) {
-				return nil
-			}
-			return err
-		}
-		if !info.IsDir() && !isSymLink(path) {
-			absPath, err := filepath.Abs(path)
-			if err != nil {
-				fmt.Println("Error:", err)
-			}
-			// NOTE: storing hashes + file pathes
-			hash := getHash(absPath)
-			if _, ex := hashes[hash]; !ex {
-				hashes[hash] = []string{}
-			}
-			hashes[hash] = append(hashes[hash], absPath)
-		}
-		return nil
-	})
+	fmt.Println("[INFO] generating file hashes...")
+	hasheToPaths := make(map[string][]string)
+	var mutex sync.Mutex
 
-	if err != nil {
-		fmt.Println("Error:", err)
-		// os.Exit(1)
+	numWorkers := runtime.NumCPU()
+	jobs := make(chan string, len(allFiles))
+	results := make(chan *FileHash, len(allFiles))
+	var wg sync.WaitGroup
+
+	for w := 1; w <= numWorkers; w++ {
+		// start workers
+		wg.Add(1)
+		go worker(jobs, results, &wg)
 	}
 
-	for _, v := range hashes {
+	// send jobs to worker
+	go func() {
+		for _, file := range allFiles {
+			jobs <- file
+		}
+		close(jobs)
+	}()
+
+	// wait for all workers
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for result := range results {
+		hash, path := result.hash, result.path
+		mutex.Lock()
+		if _, exists := hasheToPaths[hash]; !exists {
+			hasheToPaths[hash] = []string{}
+		}
+		hasheToPaths[hash] = append(hasheToPaths[hash], path)
+		mutex.Unlock()
+	}
+
+	fmt.Println("[INFO] printing all duplicate files...")
+	for _, v := range hasheToPaths {
 		if len(v) > 1 {
 			fmt.Println("{")
 			for _, p := range v {
-				fmt.Println("    " + p)
+				fmt.Println("   " + p)
 			}
 			fmt.Println("}")
 		}
