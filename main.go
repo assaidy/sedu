@@ -38,12 +38,12 @@ func listFiles(dirPath string) []string {
 
 		for _, entry := range entries {
 			path := filepath.Join(currentDir, entry.Name())
-			if isSymlink(path) {
-				continue
-			} else if entry.IsDir() {
-				stack = append(stack, path)
-			} else {
-				files = append(files, path)
+			if !isSymlink(path) {
+				if entry.IsDir() {
+					stack = append(stack, path)
+				} else {
+					files = append(files, path)
+				}
 			}
 		}
 	}
@@ -52,8 +52,6 @@ func listFiles(dirPath string) []string {
 
 // computeHash computes the SHA-1 hash of a file using buffered I/O.
 func computeHash(path string) (string, error) {
-	hasher := sha1.New()
-
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -61,6 +59,8 @@ func computeHash(path string) (string, error) {
 	defer file.Close()
 
 	bufferedReader := bufio.NewReader(file)
+	hasher := sha1.New()
+
 	if _, err := io.Copy(hasher, bufferedReader); err != nil {
 		return "", err
 	}
@@ -97,19 +97,19 @@ func main() {
 
 	dirPath := args[1]
 
-	fmt.Println("[INFO] Collecting all files...")
+	fmt.Println("Info: Collecting all files...")
 	allFiles := listFiles(dirPath)
 
-	fmt.Println("[INFO] Generating file hashes...")
+	fmt.Println("Info: Generating file hashes...")
 	hashToPaths := make(map[string][]string)
-	var mutex sync.Mutex
 
 	numWorkers := runtime.NumCPU()
 	jobs := make(chan string, len(allFiles))
 	results := make(chan *FileHash, len(allFiles))
 	var wg sync.WaitGroup
 
-	for i := 0; i < numWorkers; i++ {
+	// Start background workers
+	for range numWorkers {
 		wg.Add(1)
 		go worker(jobs, results, &wg)
 	}
@@ -129,16 +129,10 @@ func main() {
 	}()
 
 	for result := range results {
-		hash, path := result.hash, result.path
-		if _, exists := hashToPaths[hash]; !exists {
-			hashToPaths[hash] = []string{}
-		}
-		mutex.Lock()
-		hashToPaths[hash] = append(hashToPaths[hash], path)
-		mutex.Unlock()
+		hashToPaths[result.hash] = append(hashToPaths[result.hash], result.path)
 	}
 
-	fmt.Println("[INFO] Printing all duplicate files...")
+	fmt.Println("Info: Printing all duplicate files...")
 	for _, paths := range hashToPaths {
 		if len(paths) > 1 {
 			fmt.Println("{")
